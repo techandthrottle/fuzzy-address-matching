@@ -1,7 +1,8 @@
 import pandas as pd
 from flask import Flask, request, jsonify
-from thefuzz import process
-
+# from thefuzz import process
+from rapidfuzz import fuzz
+import jellyfish
 # --- 1. Initialization ---
 
 # Create the Flask application instance
@@ -29,6 +30,23 @@ except FileNotFoundError:
 except KeyError:
     print(f"Error: Column '{STREET_NAME_COLUMN}' not found in 'streets.csv'. Please check the column name.")
     street_choices = []
+
+
+def calculate_combined_score(string1, string2, rf_weight=0.7, jf_weight=0.3):
+    """
+    Calculate a combined fuzzy score using RapidFuzz and Jellyfish.
+    """
+    # 1. Get the RapidFuzz score (0-100 scale)
+    # token_sort_ratio is great for addresses as it ignores word order
+    rapidfuzz_score = fuzz.token_sort_ratio(string1, string2)
+
+    # 2. Get the Jellyfish score (Jaro-Winkler is good as it also gives a 0-1 score)
+    # We multiply by 100 to put it on the same scale as RapidFuzz
+    jellyfish_score = jellyfish.jaro_winkler_similarity(string1, string2) * 100
+
+    combined_score = (rapidfuzz_score * rf_weight) + (jellyfish_score * jf_weight)
+    # print(f"Input: {string1}, Reference: {string2}, RapidFuzz score: {rapidfuzz_score}, Jellyfish score: {jellyfish_score}, Combined score: {combined_score}")
+    return combined_score
 
 
 # --- 3. API Endpoint Definition ---
@@ -61,16 +79,21 @@ def search_street():
     # Use thefuzz.process.extract to find the best matches for the query.
     # It takes the query, the list of choices, and returns a list of tuples:
     # [('match', score), ('another_match', score), ...]
-    results = process.extract(query, street_choices, limit=limit)
+    #results = process.extract(query, street_choices, limit=limit)
+    all_results = []
+    for choice in street_choices:
+        score = calculate_combined_score(query, choice)
+        all_results.append({"match": choice, "score": score})
 
+    
+
+    # Sort all results by the new combined score
+    sorted_results = sorted(all_results, key=lambda k: k['score'], reverse=True)
     # --- 5. Format the Response ---
     
-    # Convert the list of tuples into a more friendly list of dictionaries
-    formatted_results = [
-        {"match": result[0], "score": result[1]} for result in results
-    ]
+    
 
-    return jsonify(formatted_results)
+    return jsonify(sorted_results[:limit])
 
 # --- 6. Run the Application ---
 

@@ -2,6 +2,8 @@
 
 A simple Flask API that provides fuzzy search capabilities for street names based on a master CSV file.
 
+Uses RapidFuzz and JellyFish
+
 ## How to Run
 
 1.  Clone the repository.
