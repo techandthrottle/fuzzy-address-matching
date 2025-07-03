@@ -17,16 +17,26 @@ SUBURB_COLUMN = 'suburb'
 TOWN_COLUMN = 'town'
 FULL_ADDRESS_COLUMN = 'full_address'
 
+SUBURB_COLUMN_LOWER = f'{SUBURB_COLUMN}_lower'
+TOWN_COLUMN_LOWER = f'{TOWN_COLUMN}_lower'
+
+
+streets_df = None
+unique_suburb_choices = []
+
 try:
     # IMPORTANT: Change 'StreetName' to the actual name of your column.
     streets_df = pd.read_csv('nz_streets.csv')
     
     # Get the list of street names from the DataFrame column.
     # We use .dropna() to remove any empty cells and .tolist() to convert it to a simple list.
-    streets_df[f'{SUBURB_COLUMN}_lower'] = streets_df[SUBURB_COLUMN].str.lower()
-    streets_df[f'{TOWN_COLUMN}_lower'] = streets_df[TOWN_COLUMN].str.lower()
+    streets_df[f'{SUBURB_COLUMN}_lower'] = streets_df[SUBURB_COLUMN].str.lower().fillna('')
+    streets_df[f'{TOWN_COLUMN}_lower'] = streets_df[TOWN_COLUMN].str.lower().fillna('')
+
+    unique_suburb_choices = streets_df[SUBURB_COLUMN_LOWER].unique().tolist()
     
     print(f"Successfully loaded {len(streets_df)} address records.")
+    print(f"Found {len(unique_suburb_choices)} unique suburbs for searching.")
 
 except FileNotFoundError:
     print("Error: 'streets.csv' not found. Please make sure the file is in the same directory.")
@@ -54,9 +64,9 @@ def search_street():
         return jsonify({"error": "Address data is not loaded. Check server logs."}), 500
 
     # Get the search query from the URL parameters (e.g., /search?query=Main St)
-    query = request.args.get('query')
-    suburb = request.args.get('suburb')
-    town = request.args.get('town')
+    query_street = request.args.get('query')
+    query_suburb = request.args.get('suburb')
+    query_town = request.args.get('town')
 
     # Get the optional limit parameter, defaulting to 3 if not provided
     try:
@@ -65,8 +75,8 @@ def search_street():
         limit = 3
 
     # --- Input Validation ---
-    if not query:
-        return jsonify({"error": "A 'query' parameter is required."}), 400
+    if not query_street or not query_suburb:
+        return jsonify({"error": "Both 'query' (street) and 'suburb' parameters are required."}), 400
 
     # --- 4.  ---
     
@@ -74,44 +84,44 @@ def search_street():
     # It takes the query, the list of choices, and returns a list of tuples:
     # [('match', score), ('another_match', score), ...]
     #results = process.extract(query, street_choices, limit=limit)
-    search_area_df = streets_df
-
-    # If suburb is provided, filter the DataFrame down to just that suburb
-    if suburb:
-        search_area_df = search_area_df[search_area_df[f'{SUBURB_COLUMN}_lower'] == suburb.lower()]
+    best_suburb_match = process.extractOne(
+        query_suburb.lower(),
+        unique_suburb_choices
+    )
     
-    # If town is provided, filter the DataFrame down to just that town
-    if town:
-        search_area_df = search_area_df[search_area_df[f'{TOWN_COLUMN}_lower'] == town.lower()]
-
-    # Check if any addresses match the criteria
-    if search_area_df.empty:
+    if not best_suburb_match:
         return jsonify({
-                        "error": "No streets found for the specified suburb/town.",
-                        "query": {"street": query, "suburb": suburb, "town": town}
-                        }), 404
+            "error": "Could not find a confident suburb match.",
+            "suburb_query": query_suburb
+        }), 404
     
-    # Create the list of choices for the fuzzy search FROM THE FILTERED DATA.
-    # Using .unique() is more efficient as it avoids searching the same street name multiple times.
+    matched_suburb_name, suburb_score, _ = best_suburb_match
+
+    search_area_df = streets_df[streets_df[SUBURB_COLUMN_LOWER] == matched_suburb_name]
+
     street_choices = search_area_df[STREET_COLUMN].unique().tolist()
 
-    # --- 5. Fuzzy Search Logic ---
     top_matches = process.extract(
-        query,
+        query_street,
         street_choices,
-        scorer=fuzz.WRatio,
-        limit=limit,
-        score_cutoff=75 # Only include matches with a score of 75 or higher
+        limit=limit
     )
 
-    # --- 6. Format the Response ---
-    formatted_results = []
+    response_data = {
+        "suburb_match": {
+            "input": "query_suburb",
+            "matched_to": matched_suburb_name.title(),
+            "score": round(suburb_score, 2)
+        },
+        "street_results": []
+    }
+
     for street_name, score, index in top_matches:
         # Find the first record matching the found street name within our filtered area.
         # This gives us access to the suburb, town, and full address.
         original_record = search_area_df[search_area_df[STREET_COLUMN] == street_name].iloc[0]
 
-        formatted_results.append({
+        response_data["street_results"].append({
             "street": original_record[STREET_COLUMN],
             "suburb": original_record[SUBURB_COLUMN],
             "town": original_record[TOWN_COLUMN],
@@ -119,7 +129,34 @@ def search_street():
             "score": round(score, 2)
         })
 
-    return jsonify(formatted_results)
+    return jsonify(response_data)
+
+
+    # # If suburb is provided, filter the DataFrame down to just that suburb
+    # if suburb:
+    #     search_area_df = search_area_df[search_area_df[f'{SUBURB_COLUMN}_lower'] == suburb.lower()]
+    
+    # # If town is provided, filter the DataFrame down to just that town
+    # if town:
+    #     search_area_df = search_area_df[search_area_df[f'{TOWN_COLUMN}_lower'] == town.lower()]
+
+    # # Check if any addresses match the criteria
+    # if search_area_df.empty:
+    #     return jsonify({
+    #                     "error": "No streets found for the specified suburb/town.",
+    #                     "query": {"street": query, "suburb": suburb, "town": town}
+    #                     }), 404
+    
+    # # Create the list of choices for the fuzzy search FROM THE FILTERED DATA.
+    # # Using .unique() is more efficient as it avoids searching the same street name multiple times.
+    # street_choices = search_area_df[STREET_COLUMN].unique().tolist()
+
+    # # --- 5. Fuzzy Search Logic ---
+    
+
+    # # --- 6. Format the Response ---
+    # formatted_results = []
+    
 
 # --- 6. Run the Application ---
 
