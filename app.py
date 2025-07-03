@@ -30,7 +30,7 @@ unique_location_choices = []
 def get_google_drive_file_id(url):
     """ Extracts the file ID from a Google Drive shareable link"""
     try:
-        return url.split('/d')[1].split('/')[0]
+        return url.split('/d/')[1].split('/')[0]
     except IndexError:
         print("Error: Invalid Google Drive URL Format.")
         return None
@@ -40,6 +40,7 @@ def load_data_from_google_drive():
     gdrive_shareable_link = "https://drive.google.com/file/d/1xIT98i_O_M6dBZH77PrKsCQRfLM5fRVR/view?usp=sharing"
 
     file_id = get_google_drive_file_id(gdrive_shareable_link)
+    #file_id = "1xIT98i_O_M6dBZH77PrKsCQRfLM5fRVR"
     if not file_id: return None, []
     
     download_url = f'https://drive.google.com/uc?export=download&id={file_id}'
@@ -51,8 +52,8 @@ def load_data_from_google_drive():
         csv_data = io.StringIO(response.text)
         df = pd.read_csv(csv_data)
 
-        df[SUBURB_COLUMN_LOWER] = streets_df[SUBURB_COLUMN].str.lower().fillna('')
-        df[TOWN_COLUMN_LOWER] = streets_df[TOWN_COLUMN].str.lower().fillna('')
+        df[SUBURB_COLUMN_LOWER] = df[SUBURB_COLUMN].str.lower().fillna('')
+        df[TOWN_COLUMN_LOWER] = df[TOWN_COLUMN].str.lower().fillna('')
 
         unique_suburbs = set(df[SUBURB_COLUMN_LOWER].unique())
         unique_towns = set(df[TOWN_COLUMN_LOWER].unique())
