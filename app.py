@@ -2,7 +2,10 @@ import pandas as pd
 from flask import Flask, request, jsonify
 # from thefuzz import process
 from rapidfuzz import process, fuzz
+import requests
+import io
 
+import requests.exceptions
 # --- 1. Initialization ---
 
 # Create the Flask application instance
@@ -24,27 +27,56 @@ TOWN_COLUMN_LOWER = f'{TOWN_COLUMN}_lower'
 streets_df = None
 unique_suburb_choices = []
 
-try:
-    # IMPORTANT: Change 'StreetName' to the actual name of your column.
-    streets_df = pd.read_csv('nz_streets.csv')
+
+def get_google_drive_file_id(url):
+    """ Extracts the file ID from a Google Drive shareable link"""
+    try:
+        return url.split('/d')[1].split('/')[0]
+    except IndexError:
+        print("Error: Invalid Google Drive URL Format.")
+        return None
     
-    # Get the list of street names from the DataFrame column.
-    # We use .dropna() to remove any empty cells and .tolist() to convert it to a simple list.
-    streets_df[f'{SUBURB_COLUMN}_lower'] = streets_df[SUBURB_COLUMN].str.lower().fillna('')
-    streets_df[f'{TOWN_COLUMN}_lower'] = streets_df[TOWN_COLUMN].str.lower().fillna('')
+def load_data_from_google_drive():
+    """ Loads the CSV data from a Google Drive link. """
+    gdrive_shareable_link = "https://drive.google.com/file/d/1xIT98i_O_M6dBZH77PrKsCQRfLM5fRVR/view?usp=sharing"
 
-    unique_suburb_choices = streets_df[SUBURB_COLUMN_LOWER].unique().tolist()
+    file_id = get_google_drive_file_id(gdrive_shareable_link)
+    if not file_id:
+        return None, []
     
-    print(f"Successfully loaded {len(streets_df)} address records.")
-    print(f"Found {len(unique_suburb_choices)} unique suburbs for searching.")
+    download_url = f'https://drive.google.com/uc?export=download&id={file_id}'
+    print(f"Attempting to download the data from Google Drive...")
 
-except FileNotFoundError:
-    print("Error: 'streets.csv' not found. Please make sure the file is in the same directory.")
-    streets_df = None
-except KeyError as e:
-    print(f"Error: A required column was not found in 'nz_streets.csv': {e}")
-    streets_df = None
+    try:
+        response = requests.get(download_url)
 
+        response.raise_for_status()
+
+        csv_data = io.StringIO(response.text)
+
+        df = pd.read_csv(csv_data)
+
+         df[SUBURB_COLUMN_LOWER] = streets_df[SUBURB_COLUMN].str.lower().fillna('')
+        df[TOWN_COLUMN_LOWER] = streets_df[TOWN_COLUMN].str.lower().fillna('')
+
+        suburb_choices = df[SUBURB_COLUMN_LOWER].unique().tolist()
+
+        print(f"Successfully loaded {len(df)} address records.")
+        print(f"Found {len(suburb_choices)} unique suburbs for searching.")
+
+        return df, suburb_choices
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error downloading the file from Google Drive: {e}")
+        return None, []
+    except KeyError as e:
+        print(f"Error: A required column was not found in the csv: {e}")
+        return None, []
+    except Exception as e:
+        print(f"An unexpected error occured during data loading {e}")
+        return None, []
+
+streets_df, unique_suburb_choices = load_data_from_google_drive
 
 # --- 3. API Endpoint Definition ---
 
